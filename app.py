@@ -72,7 +72,7 @@ with st.sidebar:
 
     sayfa = st.radio(
         "Menü",
-        ["📂 Excel Yükle", "💰 Ürün Maliyetleri", "📋 Giderler", "📊 Rapor"],
+        ["📂 Excel Yükle", "🤖 AI Veri Aktar", "💰 Ürün Maliyetleri", "📋 Giderler", "📊 Rapor"],
         label_visibility="collapsed"
     )
     st.markdown("---")
@@ -155,6 +155,82 @@ if sayfa == "📂 Excel Yükle":
     else:
         if st.session_state.get("df") is not None:
             st.info("Excel zaten yüklü. Yeni dosya seçmek için yukarıdan yükle.")
+
+
+# ════════════════════════════════════════════════════════════════
+# AI VERİ AKTAR
+# ════════════════════════════════════════════════════════════════
+elif sayfa == "🤖 AI Veri Aktar":
+    st.title("🤖 AI Veri Aktar")
+    st.markdown("İdea Soft AI'dan aldığın çıktıyı buraya yapıştır. Ürünler otomatik eklenir/güncellenir.")
+
+    st.markdown("---")
+    st.markdown("#### 📋 İdea Soft AI'a Yapıştıracağın Prompt")
+    st.markdown("Sadece tarih aralığını değiştir, geri kalanı aynı kalsın:")
+    st.code(
+        "[BAŞLANGIÇ_TARİHİ - BİTİŞ_TARİHİ] tarihleri arasındaki tüm siparişlerde satılan ürünleri listele.\n\n"
+        "Her ürün için şunları ver:\n"
+        "- Ürün adı (tam ve eksiksiz)\n"
+        "- Toplam satılan adet\n"
+        "- Birim satış fiyatı (KDV dahil)\n\n"
+        "Çıktıyı SADECE aşağıdaki formatta ver, başka hiçbir açıklama veya başlık ekleme:\n"
+        "ÜRÜN_ADI\tADET\tBİRİM_FİYAT\n\n"
+        "Örnek:\n"
+        "GC Tooth Mousse Çilek Aroma\t14\t250.00\n"
+        "Opalescence Go 8li Nane\t2\t180.00",
+        language=None
+    )
+
+    st.markdown("---")
+    st.markdown("#### 📥 AI Çıktısını Yapıştır")
+    ai_metin = st.text_area(
+        "AI çıktısı",
+        height=250,
+        placeholder="GC Tooth Mousse Çilek Aroma\t14\t250.00\nOpalescence Go 8li Nane\t2\t180.00",
+        label_visibility="collapsed"
+    )
+
+    if ai_metin.strip():
+        satirlar = []
+        hatalar  = []
+        for i, line in enumerate(ai_metin.strip().split("\n"), 1):
+            line = line.strip()
+            if not line:
+                continue
+            parcalar = [p.strip() for p in line.split("\t")]
+            if len(parcalar) < 2:
+                parcalar = line.rsplit(None, 2)
+            try:
+                urun_adi = parcalar[0].strip()
+                adet     = int(float(parcalar[1].replace(",", "."))) if len(parcalar) > 1 else 0
+                fiyat    = float(parcalar[2].replace(",", ".")) if len(parcalar) > 2 else 0.0
+                if urun_adi:
+                    satirlar.append({"Ürün Adı": urun_adi, "Adet": adet, "Birim Fiyat (₺)": fiyat})
+            except Exception:
+                hatalar.append(f"Satır {i} okunamadı: {line}")
+
+        if satirlar:
+            st.markdown(f"**{len(satirlar)} ürün okundu:**")
+            st.dataframe(pd.DataFrame(satirlar), use_container_width=True, height=300)
+
+            if hatalar:
+                st.warning(f"⚠️ {len(hatalar)} satır okunamadı: " + " | ".join(hatalar[:3]))
+
+            st.markdown("---")
+            st.info("**Uygula** dersen ürünler otomatik eklenir, zaten kayıtlıysa adet ve fiyat güncellenir. Maliyet girmeyi unutma.")
+
+            if st.button("✅ Ürünleri Uygula", type="primary", use_container_width=True):
+                for row in satirlar:
+                    mevcut = get_urunler()
+                    kayitli = mevcut[mevcut["urun_adi"] == row["Ürün Adı"]]
+                    if kayitli.empty:
+                        add_urun(row["Ürün Adı"])
+                    upsert_urun(row["Ürün Adı"], row["Adet"], 0.0)
+                st.success(f"✅ {len(satirlar)} ürün Ürün Maliyetleri'ne aktarıldı! Şimdi maliyet gir.")
+                st.balloons()
+        else:
+            if hatalar:
+                st.error("Çıktı okunamadı. Format: `Ürün Adı TAB Adet TAB Fiyat` olmalı.")
 
 
 # ════════════════════════════════════════════════════════════════
