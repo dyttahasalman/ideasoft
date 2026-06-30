@@ -172,8 +172,8 @@ elif sayfa == "🤖 AI Veri Aktar":
         "Her ürün için şunları ver:\n"
         "- Ürün adı (tam ve eksiksiz)\n"
         "- Toplam satılan adet\n"
-        "- Birim satış fiyatı (KDV dahil)\n\n"
-        "Çıktıyı Excel tablosu olarak ver. Sütunlar: ÜRÜN ADI | ADET | BİRİM FİYAT",
+        "- Birim satış fiyatı (KDV dahil, MUTLAKA Türk Lirası cinsinden — euro veya dolar olan ürünlerin fiyatlarını sipariş anındaki kur üzerinden TL'ye çevir)\n\n"
+        "Çıktıyı Excel tablosu olarak ver. Sütunlar: ÜRÜN ADI | ADET | BİRİM FİYAT (TL)",
         language=None
     )
 
