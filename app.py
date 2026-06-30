@@ -2,7 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import io
-from database import init_db, get_maliyetler, save_maliyet, delete_maliyet, get_giderler, save_gider, delete_gider
+from database import (
+    init_db, get_urunler, upsert_urun, add_urun, delete_urun, reset_adetler,
+    get_giderler, save_gider, delete_gider
+)
 
 st.set_page_config(
     page_title="İdea Soft | Kar Takip",
@@ -159,54 +162,73 @@ if sayfa == "📂 Excel Yükle":
 # ════════════════════════════════════════════════════════════════
 elif sayfa == "💰 Ürün Maliyetleri":
     st.title("💰 Ürün Maliyetleri")
-    st.markdown("Bu dönem sattığın ürünleri, adetlerini ve birim maliyetlerini gir.")
 
-    maliyetler = get_maliyetler()
+    urunler = get_urunler()
 
-    # Mevcut kayıtlar
-    if not maliyetler.empty:
-        toplam_maliyet = maliyetler["toplam_maliyet"].sum()
-        toplam_adet    = int(maliyetler["adet"].sum())
-        st.markdown(f"#### Kayıtlı Ürünler — {toplam_adet} adet | Toplam Maliyet: **{para(toplam_maliyet)}**")
-
-        for _, row in maliyetler.iterrows():
-            c1, c2, c3, c4, c5 = st.columns([4, 2, 2, 2, 1])
-            c1.write(f"**{row['urun_adi']}**")
-            c2.write(f"{int(row['adet'])} adet")
-            c3.write(f"₺{row['birim_maliyet']:.2f} / adet")
-            c4.write(f"**{para(row['toplam_maliyet'])}**")
-            if c5.button("🗑️", key=f"sil_{row['id']}"):
-                delete_maliyet(int(row["id"]))
-                st.rerun()
-        st.markdown("---")
+    if urunler.empty:
+        st.info("Henüz ürün eklenmedi. Aşağıdan ürünlerini ekle — bir kez ekle, hep hatırlasın.")
     else:
-        st.info("Henüz ürün eklenmedi.")
+        toplam_maliyet = urunler["toplam_maliyet"].sum()
+        toplam_adet    = int(urunler["adet"].sum())
+        st.markdown(f"**{len(urunler)} ürün** — {toplam_adet} adet | Toplam Maliyet: **{para(toplam_maliyet)}**")
+        st.caption("Her dönem sadece adet ve maliyeti güncelle, Kaydet'e bas.")
         st.markdown("---")
 
-    # Yeni ürün ekle
-    st.markdown("#### ➕ Ürün Ekle")
-    mc1, mc2, mc3 = st.columns([4, 2, 2])
-    with mc1:
-        urun_adi = st.text_input("Ürün Adı", placeholder="GC Tooth Mousse Çilek Aroma")
-    with mc2:
-        adet = st.number_input("Adet", min_value=0, step=1, value=0)
-    with mc3:
-        birim_maliyet = st.number_input("Birim Maliyet (₺)", min_value=0.0, step=0.5, format="%.2f", value=0.0)
+        with st.form("urun_form"):
+            for i, row in urunler.iterrows():
+                c1, c2, c3, c4 = st.columns([5, 2, 2, 1])
+                with c1:
+                    st.markdown(f"**{row['urun_adi']}**")
+                with c2:
+                    st.number_input("Adet", value=int(row["adet"]),
+                                    min_value=0, step=1, key=f"adet_{row['id']}")
+                with c3:
+                    st.number_input("Birim Maliyet (₺)", value=float(row["birim_maliyet"]),
+                                    min_value=0.0, step=0.5, format="%.2f", key=f"mal_{row['id']}")
+                with c4:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.caption(f"₺{row['toplam_maliyet']:,.0f}")
+                st.divider()
 
-    if st.button("➕ Ekle", type="primary"):
-        if urun_adi.strip() and adet > 0 and birim_maliyet > 0:
-            save_maliyet(urun_adi.strip(), int(adet), birim_maliyet)
-            st.success(f"✅ '{urun_adi}' eklendi!")
+            if st.form_submit_button("💾 Kaydet", type="primary", use_container_width=True):
+                for i, row in urunler.iterrows():
+                    upsert_urun(
+                        row["urun_adi"],
+                        st.session_state.get(f"adet_{row['id']}", 0),
+                        st.session_state.get(f"mal_{row['id']}", 0.0),
+                    )
+                st.success("✅ Kaydedildi!")
+                st.rerun()
+
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            if st.button("🔄 Adetleri Sıfırla (Yeni Dönem)", use_container_width=True):
+                reset_adetler()
+                st.success("Adetler sıfırlandı, maliyetler korundu.")
+                st.rerun()
+        with col_r2:
+            if st.button("🗑️ Ürün Sil Modu", use_container_width=True):
+                st.session_state["sil_modu"] = not st.session_state.get("sil_modu", False)
+                st.rerun()
+
+        if st.session_state.get("sil_modu"):
+            st.markdown("**Silmek istediğin ürünü seç:**")
+            for _, row in urunler.iterrows():
+                if st.button(f"🗑️ {row['urun_adi']}", key=f"sil_{row['id']}"):
+                    delete_urun(int(row["id"]))
+                    st.rerun()
+
+    st.markdown("---")
+    st.markdown("#### ➕ Yeni Ürün Ekle")
+    st.caption("Ürün adını gir, listeye ekle. Adet ve maliyet yukarıdan girilir.")
+    yeni_urun = st.text_input("Ürün Adı", placeholder="GC Tooth Mousse Çilek Aroma")
+    if st.button("➕ Listeye Ekle", type="primary"):
+        if yeni_urun.strip():
+            add_urun(yeni_urun.strip())
+            st.success(f"✅ '{yeni_urun}' eklendi!")
             st.rerun()
         else:
-            st.error("Ürün adı, adet ve birim maliyet zorunlu.")
-
-    if not maliyetler.empty:
-        st.markdown("---")
-        if st.button("🗑️ Tüm Ürünleri Temizle", type="secondary"):
-            for mid in maliyetler["id"].tolist():
-                delete_maliyet(int(mid))
-            st.rerun()
+            st.error("Ürün adı boş olamaz.")
 
 
 # ════════════════════════════════════════════════════════════════
@@ -265,7 +287,7 @@ elif sayfa == "📊 Rapor":
     st.title("📊 Rapor")
 
     aktif_gelir = st.session_state.get("aktif_gelir")
-    maliyetler  = get_maliyetler()
+    maliyetler  = get_urunler()
     giderler    = get_giderler()
 
     if aktif_gelir is None and st.session_state.get("df") is not None:

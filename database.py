@@ -31,10 +31,11 @@ def get_connection():
 def init_db():
     conn = get_connection()
     c = conn.cursor()
+    # Kalıcı ürün kataloğu — adet her dönem güncellenir
     c.execute("""
-        CREATE TABLE IF NOT EXISTS is_maliyetler (
+        CREATE TABLE IF NOT EXISTS is_urunler (
             id SERIAL PRIMARY KEY,
-            urun_adi TEXT NOT NULL,
+            urun_adi TEXT UNIQUE NOT NULL,
             adet INTEGER DEFAULT 0,
             birim_maliyet REAL DEFAULT 0,
             toplam_maliyet REAL DEFAULT 0
@@ -51,26 +52,53 @@ def init_db():
     conn.commit()
 
 
-def get_maliyetler():
+@st.cache_data(ttl=60)
+def get_urunler():
     conn = get_connection()
-    return pd.read_sql("SELECT * FROM is_maliyetler ORDER BY id", conn)
+    return pd.read_sql("SELECT * FROM is_urunler ORDER BY urun_adi", conn)
 
 
-def save_maliyet(urun_adi, adet, birim_maliyet):
+def upsert_urun(urun_adi, adet, birim_maliyet):
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
-        INSERT INTO is_maliyetler (urun_adi, adet, birim_maliyet, toplam_maliyet)
+        INSERT INTO is_urunler (urun_adi, adet, birim_maliyet, toplam_maliyet)
         VALUES (%s, %s, %s, %s)
-    """, (urun_adi, adet, birim_maliyet, adet * birim_maliyet))
+        ON CONFLICT (urun_adi) DO UPDATE SET
+            adet           = EXCLUDED.adet,
+            birim_maliyet  = EXCLUDED.birim_maliyet,
+            toplam_maliyet = EXCLUDED.toplam_maliyet
+    """, (urun_adi.strip(), int(adet), float(birim_maliyet), int(adet) * float(birim_maliyet)))
     conn.commit()
+    get_urunler.clear()
 
 
-def delete_maliyet(maliyet_id):
+def add_urun(urun_adi):
     conn = get_connection()
     c = conn.cursor()
-    c.execute("DELETE FROM is_maliyetler WHERE id = %s", (maliyet_id,))
+    c.execute("""
+        INSERT INTO is_urunler (urun_adi, adet, birim_maliyet, toplam_maliyet)
+        VALUES (%s, 0, 0, 0)
+        ON CONFLICT (urun_adi) DO NOTHING
+    """, (urun_adi.strip(),))
     conn.commit()
+    get_urunler.clear()
+
+
+def delete_urun(urun_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM is_urunler WHERE id = %s", (urun_id,))
+    conn.commit()
+    get_urunler.clear()
+
+
+def reset_adetler():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE is_urunler SET adet = 0, toplam_maliyet = 0")
+    conn.commit()
+    get_urunler.clear()
 
 
 def get_giderler():
