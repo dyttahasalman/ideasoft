@@ -12,9 +12,8 @@ st.set_page_config(
 )
 init_db()
 
-AKTIF_DURUMLAR = {"fulfilled", "approved", "delivered"}
-IPTAL_DURUMLAR = {"cancelled"}
-ODEME_BASARILI = {"success"}
+IPTAL_DURUMLAR  = {"cancelled"}
+ODEME_BASARISIZ = {"failed"}
 
 
 def para(x):
@@ -75,9 +74,9 @@ if sayfa == "📂 Excel Yükle":
         df = parse_excel(dosya)
         st.session_state["df"] = df
 
-        aktif  = df[df["durum"].isin(AKTIF_DURUMLAR) & df["odeme"].isin(ODEME_BASARILI)]
+        aktif  = df[~df["durum"].isin(IPTAL_DURUMLAR) & ~df["odeme"].isin(ODEME_BASARISIZ)]
         iptal  = df[df["durum"].isin(IPTAL_DURUMLAR)]
-        bekler = df[~df["durum"].isin(AKTIF_DURUMLAR) & ~df["durum"].isin(IPTAL_DURUMLAR)]
+        bekler = df[df["odeme"].isin(ODEME_BASARISIZ)]
 
         st.markdown("---")
         c1, c2, c3, c4 = st.columns(4)
@@ -105,7 +104,7 @@ if sayfa == "📂 Excel Yükle":
             with col_b:
                 bit = st.date_input("Bitiş",     value=max_t, min_value=min_t, max_value=max_t)
 
-            aktif_f = aktif[(tarihler.dt.date >= bas) & (tarihler.dt.date <= bit)]
+            aktif_f = aktif[(pd.to_datetime(aktif["tarih"]).dt.date >= bas) & (pd.to_datetime(aktif["tarih"]).dt.date <= bit)]
             st.session_state["aktif_gelir"] = aktif_f["tutar"].sum()
             st.session_state["tarih_aralik"] = f"{bas.strftime('%d.%m.%Y')} – {bit.strftime('%d.%m.%Y')}"
             st.success(f"📅 {bas.strftime('%d.%m.%Y')} – {bit.strftime('%d.%m.%Y')} → Aktif Gelir: **{para(aktif_f['tutar'].sum())}** ({len(aktif_f)} sipariş)")
