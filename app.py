@@ -104,6 +104,30 @@ if sayfa == "📂 Excel Yükle":
         st.session_state["aktif_gelir"]  = aktif["tutar"].sum()
         st.session_state["tarih_aralik"] = f"{df['tarih'].min()[:10]} – {df['tarih'].max()[:10]}"
 
+        # ── Kargo Hesaplayıcı ──────────────────────────────────
+        st.markdown("---")
+        st.markdown("#### 🚚 Kargo")
+        aktif_siparis = len(aktif)
+        kc1, kc2, kc3 = st.columns(3)
+        with kc1:
+            st.metric("Aktif Sipariş Sayısı", aktif_siparis)
+        with kc2:
+            kargo_birim = st.number_input(
+                "Birim Kargo Ücreti (₺)",
+                min_value=0.0, step=1.0, format="%.2f",
+                value=102.0
+            )
+        with kc3:
+            kargo_toplam = aktif_siparis * kargo_birim
+            st.metric("Toplam Kargo", para(kargo_toplam))
+
+        if st.button("🚚 Kargoyu Gidere Ekle", type="primary"):
+            if kargo_toplam > 0:
+                save_gider("Kargo", f"{aktif_siparis} sipariş × ₺{kargo_birim:.2f}", kargo_toplam)
+                st.success(f"✅ {para(kargo_toplam)} kargo gidere eklendi!")
+            else:
+                st.error("Kargo ücreti 0 olamaz.")
+
         # Tüm sipariş tablosu
         st.markdown("---")
         st.markdown("#### Sipariş Listesi")
@@ -196,26 +220,6 @@ elif sayfa == "📋 Giderler":
     else:
         st.info("Henüz gider eklenmedi.")
         st.markdown("---")
-
-    # Kargo hesaplayıcı
-    st.markdown("#### 🚚 Kargo")
-    kc1, kc2, kc3 = st.columns(3)
-    with kc1:
-        kargo_adet  = st.number_input("Kargo Adedi", min_value=0, step=1, value=0)
-    with kc2:
-        kargo_birim = st.number_input("Birim Fiyat (₺)", min_value=0.0, step=1.0, format="%.2f", value=0.0)
-    with kc3:
-        st.metric("Toplam Kargo", para(kargo_adet * kargo_birim))
-
-    if st.button("🚚 Kargoyu Gidere Ekle", type="primary"):
-        toplam_k = kargo_adet * kargo_birim
-        if toplam_k > 0:
-            save_gider("Kargo", f"{kargo_adet} adet × ₺{kargo_birim:.2f}", toplam_k)
-            st.rerun()
-        else:
-            st.error("Adet ve birim fiyat gir.")
-
-    st.markdown("---")
 
     # Diğer gider
     st.markdown("#### 📌 Diğer Gider")
