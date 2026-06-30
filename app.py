@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
-from database import init_db, get_urun_map, save_urun, get_giderler, save_gider, delete_gider
+import plotly.graph_objects as go
+import io
+from database import init_db, get_maliyetler, save_maliyet, delete_maliyet, get_giderler, save_gider, delete_gider
 
 st.set_page_config(
     page_title="İdea Soft | Kar Takip",
@@ -10,24 +12,32 @@ st.set_page_config(
 )
 init_db()
 
+AKTIF_DURUMLAR = {"fulfilled", "approved", "delivered"}
+IPTAL_DURUMLAR = {"cancelled"}
+ODEME_BASARILI = {"success"}
+
 
 def para(x):
     return f"₺{x:,.2f}"
 
 
-def parse_liste(metin):
+def parse_excel(dosya):
+    wb_bytes = dosya.read()
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(wb_bytes))
+    ws = wb.active
     satirlar = []
-    for line in metin.strip().split("\n"):
-        line = line.strip()
-        if not line:
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if row[0] is None:
             continue
-        parts = line.rsplit(None, 1)
-        if len(parts) == 2:
-            try:
-                satirlar.append({"urun_adi": parts[0].strip(), "adet": int(parts[1].strip())})
-            except ValueError:
-                continue
-    return satirlar
+        satirlar.append({
+            "siparis_no":  row[0],
+            "durum":       str(row[5] or "").strip(),
+            "odeme":       str(row[6] or "").strip(),
+            "tutar":       float(row[7] or 0),
+            "tarih":       str(row[8] or "")[:10],
+        })
+    return pd.DataFrame(satirlar)
 
 
 # ── Sidebar ──────────────────────────────────────────────────────
@@ -35,117 +45,147 @@ with st.sidebar:
     st.markdown("## 🦷 İdea Soft")
     st.caption("Kar Takip Sistemi")
     st.markdown("---")
+
     sayfa = st.radio(
         "Menü",
-        ["📋 Veri Gir", "💰 Fiyat & Maliyet", "📋 Giderler", "📊 Rapor"],
+        ["📂 Excel Yükle", "💰 Ürün Maliyetleri", "📋 Giderler", "📊 Rapor"],
         label_visibility="collapsed"
     )
     st.markdown("---")
-    satirlar = st.session_state.get("satirlar", [])
-    if satirlar:
-        st.success(f"✅ {len(satirlar)} ürün yüklü")
+
+    if st.session_state.get("df") is not None:
+        df = st.session_state["df"]
+        aktif = df[df["durum"].isin(AKTIF_DURUMLAR) & df["odeme"].isin(ODEME_BASARILI)]
+        st.success(f"✅ {len(df)} sipariş yüklü")
+        st.metric("Aktif Gelir", para(aktif["tutar"].sum()))
     else:
-        st.info("Henüz ürün girilmedi")
+        st.info("Excel henüz yüklenmedi")
 
 
 # ════════════════════════════════════════════════════════════════
-# VERİ GİR
+# EXCEL YÜKLE
 # ════════════════════════════════════════════════════════════════
-if sayfa == "📋 Veri Gir":
-    st.title("📋 Ürün Listesi Gir")
-    st.markdown(
-        "İdea Soft panelinden kopyaladığın ürün listesini aşağıya yapıştır.  \n"
-        "Format: **Ürün Adı** ve yanında **adet** sayısı olmalı."
-    )
+if sayfa == "📂 Excel Yükle":
+    st.title("📂 Excel Yükle")
+    st.markdown("İdea Soft panelinden indirdiğin sipariş raporunu yükle.")
 
-    metin = st.text_area(
-        "Liste",
-        height=320,
-        placeholder="GC Tooth Mousse Çilek aroma    14\nOpalescence Go 8 li Nane    2\nPro Bleach Ağız Duşu    2",
-        label_visibility="collapsed",
-        value="\n".join(
-            f"{r['urun_adi']}    {r['adet']}"
-            for r in st.session_state.get("satirlar", [])
-        ) if st.session_state.get("satirlar") else ""
-    )
+    dosya = st.file_uploader("Sipariş raporu (.xlsx)", type=["xlsx"])
 
-    c1, c2 = st.columns([1, 5])
-    with c1:
-        if st.button("✅ Yükle", type="primary", use_container_width=True):
-            sonuc = parse_liste(metin)
-            if sonuc:
-                st.session_state["satirlar"] = sonuc
-                st.success(f"✅ {len(sonuc)} ürün yüklendi!")
-                st.rerun()
-            else:
-                st.error("Liste okunamadı. Her satır 'Ürün Adı    Adet' formatında olmalı.")
-    with c2:
-        if st.button("🗑️ Temizle", use_container_width=True):
-            st.session_state.pop("satirlar", None)
-            st.rerun()
+    if dosya:
+        df = parse_excel(dosya)
+        st.session_state["df"] = df
 
-    if st.session_state.get("satirlar"):
+        aktif  = df[df["durum"].isin(AKTIF_DURUMLAR) & df["odeme"].isin(ODEME_BASARILI)]
+        iptal  = df[df["durum"].isin(IPTAL_DURUMLAR)]
+        bekler = df[~df["durum"].isin(AKTIF_DURUMLAR) & ~df["durum"].isin(IPTAL_DURUMLAR)]
+
         st.markdown("---")
-        df = pd.DataFrame(st.session_state["satirlar"])
-        df.columns = ["Ürün Adı", "Adet"]
-        st.dataframe(df, use_container_width=True, height=420)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Toplam Sipariş", len(df))
+        c2.metric("Aktif & Ödendi",  len(aktif),  help="fulfilled/approved/delivered + success")
+        c3.metric("İptal",           len(iptal))
+        c4.metric("Bekleyen",        len(bekler))
 
+        st.markdown("---")
+        d1, d2, d3 = st.columns(3)
+        d1.metric("Aktif Gelir",    para(aktif["tutar"].sum()))
+        d2.metric("İptal Bedeli",   para(iptal["tutar"].sum()))
+        d3.metric("Bekleyen Bedel", para(bekler["tutar"].sum()))
 
-# ════════════════════════════════════════════════════════════════
-# FİYAT & MALİYET
-# ════════════════════════════════════════════════════════════════
-elif sayfa == "💰 Fiyat & Maliyet":
-    st.title("💰 Fiyat & Maliyet")
+        # Tarih aralığı
+        if not aktif.empty:
+            st.markdown("---")
+            st.markdown("#### 📅 Tarih Filtresi (opsiyonel)")
+            tarihler = pd.to_datetime(aktif["tarih"])
+            min_t = tarihler.min().date()
+            max_t = tarihler.max().date()
+            col_a, col_b = st.columns(2)
+            with col_a:
+                bas = st.date_input("Başlangıç", value=min_t, min_value=min_t, max_value=max_t)
+            with col_b:
+                bit = st.date_input("Bitiş",     value=max_t, min_value=min_t, max_value=max_t)
 
-    if not st.session_state.get("satirlar"):
-        st.info("Önce **Veri Gir** sayfasından ürün listesini yükle.")
-        st.stop()
+            aktif_f = aktif[(tarihler.dt.date >= bas) & (tarihler.dt.date <= bit)]
+            st.session_state["aktif_gelir"] = aktif_f["tutar"].sum()
+            st.session_state["tarih_aralik"] = f"{bas.strftime('%d.%m.%Y')} – {bit.strftime('%d.%m.%Y')}"
+            st.success(f"📅 {bas.strftime('%d.%m.%Y')} – {bit.strftime('%d.%m.%Y')} → Aktif Gelir: **{para(aktif_f['tutar'].sum())}** ({len(aktif_f)} sipariş)")
 
-    urun_map = get_urun_map()
-    satirlar = st.session_state["satirlar"]
+            # Günlük grafik
+            st.markdown("---")
+            gunluk = aktif_f.copy()
+            gunluk["tarih_dt"] = pd.to_datetime(gunluk["tarih"])
+            gunluk = gunluk.groupby("tarih_dt")["tutar"].sum().reset_index()
+            fig = go.Figure()
+            fig.add_trace(go.Bar(x=gunluk["tarih_dt"], y=gunluk["tutar"], marker_color="#0066cc", name="Günlük Gelir"))
+            fig.update_layout(title="Günlük Sipariş Geliri", height=280, margin=dict(t=35))
+            st.plotly_chart(fig, use_container_width=True)
 
-    eksik = sum(1 for r in satirlar if r["urun_adi"] not in urun_map)
-    if eksik:
-        st.warning(f"⚠️ {eksik} ürünün fiyat/maliyet bilgisi girilmemiş.")
+        # Tüm sipariş tablosu
+        st.markdown("---")
+        st.markdown("#### Sipariş Listesi")
+        goster = df.copy()
+        goster.columns = ["Sipariş No", "Durum", "Ödeme", "Tutar", "Tarih"]
+        st.dataframe(
+            goster.style.format({"Tutar": "₺{:,.2f}"}),
+            use_container_width=True, height=360
+        )
     else:
-        st.success("✅ Tüm ürünlerin fiyat ve maliyeti kayıtlı.")
+        if st.session_state.get("df") is not None:
+            st.info("Excel zaten yüklü. Yeni dosya seçmek için yukarıdan yükle.")
 
-    st.markdown(f"**{len(satirlar)} ürün** — satış fiyatı ve maliyet gir, **Kaydet** tıkla.")
-    st.markdown("---")
 
-    with st.form("fiyat_form"):
-        for i, row in enumerate(satirlar):
-            urun_adi = row["urun_adi"]
-            kayit = urun_map.get(urun_adi, {})
-            mevcut_fiyat   = float(kayit.get("satis_fiyati", 0.0))
-            mevcut_maliyet = float(kayit.get("maliyet", 0.0))
+# ════════════════════════════════════════════════════════════════
+# ÜRÜN MALİYETLERİ
+# ════════════════════════════════════════════════════════════════
+elif sayfa == "💰 Ürün Maliyetleri":
+    st.title("💰 Ürün Maliyetleri")
+    st.markdown("Bu dönem sattığın ürünleri, adetlerini ve birim maliyetlerini gir.")
 
-            st.markdown(f"**{urun_adi[:90]}**")
-            c1, c2, c3 = st.columns([3, 2, 2])
-            with c1:
-                st.caption(f"Adet: {row['adet']}")
-            with c2:
-                st.number_input(
-                    "Satış Fiyatı (₺)", value=mevcut_fiyat,
-                    min_value=0.0, step=0.5, format="%.2f",
-                    key=f"fiyat_{i}"
-                )
-            with c3:
-                st.number_input(
-                    "Maliyet (₺)", value=mevcut_maliyet,
-                    min_value=0.0, step=0.5, format="%.2f",
-                    key=f"mal_{i}"
-                )
-            st.divider()
+    maliyetler = get_maliyetler()
 
-        if st.form_submit_button("💾 Tümünü Kaydet", type="primary", use_container_width=True):
-            for i, row in enumerate(satirlar):
-                save_urun(
-                    row["urun_adi"],
-                    st.session_state.get(f"fiyat_{i}", 0.0),
-                    st.session_state.get(f"mal_{i}", 0.0),
-                )
-            st.success("✅ Kaydedildi!")
+    # Mevcut kayıtlar
+    if not maliyetler.empty:
+        toplam_maliyet = maliyetler["toplam_maliyet"].sum()
+        toplam_adet    = int(maliyetler["adet"].sum())
+        st.markdown(f"#### Kayıtlı Ürünler — {toplam_adet} adet | Toplam Maliyet: **{para(toplam_maliyet)}**")
+
+        for _, row in maliyetler.iterrows():
+            c1, c2, c3, c4, c5 = st.columns([4, 2, 2, 2, 1])
+            c1.write(f"**{row['urun_adi']}**")
+            c2.write(f"{int(row['adet'])} adet")
+            c3.write(f"₺{row['birim_maliyet']:.2f} / adet")
+            c4.write(f"**{para(row['toplam_maliyet'])}**")
+            if c5.button("🗑️", key=f"sil_{row['id']}"):
+                delete_maliyet(int(row["id"]))
+                st.rerun()
+        st.markdown("---")
+    else:
+        st.info("Henüz ürün eklenmedi.")
+        st.markdown("---")
+
+    # Yeni ürün ekle
+    st.markdown("#### ➕ Ürün Ekle")
+    mc1, mc2, mc3 = st.columns([4, 2, 2])
+    with mc1:
+        urun_adi = st.text_input("Ürün Adı", placeholder="GC Tooth Mousse Çilek Aroma")
+    with mc2:
+        adet = st.number_input("Adet", min_value=0, step=1, value=0)
+    with mc3:
+        birim_maliyet = st.number_input("Birim Maliyet (₺)", min_value=0.0, step=0.5, format="%.2f", value=0.0)
+
+    if st.button("➕ Ekle", type="primary"):
+        if urun_adi.strip() and adet > 0 and birim_maliyet > 0:
+            save_maliyet(urun_adi.strip(), int(adet), birim_maliyet)
+            st.success(f"✅ '{urun_adi}' eklendi!")
+            st.rerun()
+        else:
+            st.error("Ürün adı, adet ve birim maliyet zorunlu.")
+
+    if not maliyetler.empty:
+        st.markdown("---")
+        if st.button("🗑️ Tüm Ürünleri Temizle", type="secondary"):
+            for mid in maliyetler["id"].tolist():
+                delete_maliyet(int(mid))
             st.rerun()
 
 
@@ -173,7 +213,7 @@ elif sayfa == "📋 Giderler":
         st.info("Henüz gider eklenmedi.")
         st.markdown("---")
 
-    # ── Kargo hesaplayıcı ──────────────────────────────────────
+    # Kargo hesaplayıcı
     st.markdown("#### 🚚 Kargo")
     kc1, kc2, kc3 = st.columns(3)
     with kc1:
@@ -193,14 +233,14 @@ elif sayfa == "📋 Giderler":
 
     st.markdown("---")
 
-    # ── Diğer gider ────────────────────────────────────────────
+    # Diğer gider
     st.markdown("#### 📌 Diğer Gider")
-    mc1, mc2, mc3 = st.columns([2, 4, 2])
-    with mc1:
+    dc1, dc2, dc3 = st.columns([2, 4, 2])
+    with dc1:
         g_kat  = st.text_input("Kategori", placeholder="Reklam, Vergi...")
-    with mc2:
+    with dc2:
         g_acik = st.text_input("Açıklama", placeholder="Detay (opsiyonel)")
-    with mc3:
+    with dc3:
         g_tutar = st.number_input("Tutar (₺)", min_value=0.0, step=1.0, format="%.2f")
 
     if st.button("➕ Ekle"):
@@ -210,7 +250,6 @@ elif sayfa == "📋 Giderler":
         else:
             st.error("Kategori ve tutar zorunlu.")
 
-    # ── Tüm giderleri sıfırla ──────────────────────────────────
     if not giderler.empty:
         st.markdown("---")
         if st.button("🗑️ Tüm Giderleri Temizle", type="secondary"):
@@ -225,100 +264,68 @@ elif sayfa == "📋 Giderler":
 elif sayfa == "📊 Rapor":
     st.title("📊 Rapor")
 
-    if not st.session_state.get("satirlar"):
-        st.info("Önce **Veri Gir** sayfasından ürün listesini yükle.")
+    aktif_gelir = st.session_state.get("aktif_gelir")
+    maliyetler  = get_maliyetler()
+    giderler    = get_giderler()
+
+    if aktif_gelir is None and st.session_state.get("df") is not None:
+        df = st.session_state["df"]
+        aktif = df[df["durum"].isin(AKTIF_DURUMLAR) & df["odeme"].isin(ODEME_BASARILI)]
+        aktif_gelir = aktif["tutar"].sum()
+        st.session_state["aktif_gelir"] = aktif_gelir
+
+    if aktif_gelir is None:
+        st.warning("Önce **Excel Yükle** sayfasından sipariş raporunu yükle.")
         st.stop()
 
-    satirlar  = st.session_state["satirlar"]
-    urun_map  = get_urun_map()
-    giderler  = get_giderler()
-    toplam_gider = giderler["tutar"].sum() if not giderler.empty else 0
+    toplam_maliyet = maliyetler["toplam_maliyet"].sum() if not maliyetler.empty else 0
+    toplam_gider   = giderler["tutar"].sum() if not giderler.empty else 0
+    brut_kar       = aktif_gelir - toplam_maliyet
+    net_kar        = brut_kar - toplam_gider
+    marj           = (net_kar / aktif_gelir * 100) if aktif_gelir > 0 else 0
+    tarih_aralik   = st.session_state.get("tarih_aralik", "Tüm dönem")
 
-    rows = []
-    for row in satirlar:
-        urun_adi = row["urun_adi"]
-        adet     = row["adet"]
-        kayit    = urun_map.get(urun_adi, {})
-        fiyat    = float(kayit.get("satis_fiyati", 0.0))
-        maliyet  = float(kayit.get("maliyet", 0.0))
-        net_satis       = fiyat * adet
-        toplam_maliyet  = maliyet * adet
-        rows.append({
-            "urun_adi":       urun_adi,
-            "adet":           adet,
-            "satis_fiyati":   fiyat,
-            "maliyet":        maliyet,
-            "net_satis":      net_satis,
-            "toplam_maliyet": toplam_maliyet,
-            "brut_kar":       net_satis - toplam_maliyet,
-        })
+    # ── Özet kartı ──
+    kar_renk = "#1a7f37" if net_kar >= 0 else "#c0392b"
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#1a3a5c,#2e6da4);padding:20px 28px;'
+        f'border-radius:12px;color:white;margin-bottom:16px;">'
+        f'<div style="font-size:11px;opacity:.8;letter-spacing:2px;text-transform:uppercase">İdea Soft · {tarih_aralik}</div>'
+        f'<div style="font-size:20px;font-weight:700;margin-top:4px;">Satış & Kar Raporu</div>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
 
-    df = pd.DataFrame(rows)
-
-    # Gider paylaşımı
-    toplam_net = df["net_satis"].sum()
-    df["gider_payi"] = (df["net_satis"] / toplam_net * toplam_gider) if toplam_net > 0 else 0
-    df["net_kar"]    = df["brut_kar"] - df["gider_payi"]
-
-    net_satis_top = df["net_satis"].sum()
-    maliyet_top   = df["toplam_maliyet"].sum()
-    brut_kar_top  = df["brut_kar"].sum()
-    net_kar_top   = df["net_kar"].sum()
-    marj          = (net_kar_top / net_satis_top * 100) if net_satis_top > 0 else 0
-    toplam_adet   = int(df["adet"].sum())
-
-    # ── Metrikler ──
-    st.markdown("#### Özet")
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Toplam Adet",    toplam_adet)
-    c2.metric("Net Satış",      para(net_satis_top))
-    c3.metric("Ürün Maliyeti",  para(-maliyet_top))
-    c4.metric("Diğer Giderler", para(-toplam_gider))
-    c5.metric("NET KAR",        para(net_kar_top), delta=f"%{marj:.1f} marj")
+    c1.metric("Aktif Gelir",      para(aktif_gelir))
+    c2.metric("Ürün Maliyeti",    para(-toplam_maliyet))
+    c3.metric("Diğer Giderler",   para(-toplam_gider))
+    c4.metric("Brüt Kar",         para(brut_kar))
+    c5.metric("NET KAR",          para(net_kar), delta=f"%{marj:.1f} marj")
 
     st.markdown("---")
 
-    # ── Uyarı ──
-    eksik = (df["satis_fiyati"] == 0).sum()
-    if eksik:
-        st.warning(f"⚠️ {eksik} ürünün fiyatı girilmemiş — **Fiyat & Maliyet** sayfasından doldur.")
+    # ── Ürün maliyet tablosu ──
+    if not maliyetler.empty:
+        st.markdown("#### 📦 Ürün Maliyet Dökümü")
+        goster = maliyetler[["urun_adi", "adet", "birim_maliyet", "toplam_maliyet"]].copy()
+        goster.columns = ["Ürün Adı", "Adet", "Birim Maliyet", "Toplam Maliyet"]
 
-    # ── Tablo ──
-    goster = df[["urun_adi", "adet", "satis_fiyati", "maliyet",
-                 "net_satis", "toplam_maliyet", "brut_kar", "net_kar"]].copy()
-    goster.columns = ["Ürün Adı", "Adet", "Satış Fiyatı", "Birim Maliyet",
-                      "Net Satış", "Toplam Maliyet", "Brüt Kar", "Net Kar"]
+        toplam_satir = pd.DataFrame([{
+            "Ürün Adı": "TOPLAM", "Adet": int(goster["Adet"].sum()),
+            "Birim Maliyet": None, "Toplam Maliyet": goster["Toplam Maliyet"].sum()
+        }])
+        goster = pd.concat([goster, toplam_satir], ignore_index=True)
 
-    # Toplam satırı
-    toplam_satir = pd.DataFrame([{
-        "Ürün Adı": "TOPLAM", "Adet": toplam_adet,
-        "Satış Fiyatı": None, "Birim Maliyet": None,
-        "Net Satış": net_satis_top, "Toplam Maliyet": maliyet_top,
-        "Brüt Kar": brut_kar_top, "Net Kar": net_kar_top
-    }])
-    goster = pd.concat([goster, toplam_satir], ignore_index=True)
-
-    def renk_kar(val):
-        try:
-            f = float(val)
-            if f > 0: return "color:#28a745;font-weight:bold"
-            if f < 0: return "color:#dc3545;font-weight:bold"
-        except Exception:
-            pass
-        return ""
-
-    st.dataframe(
-        goster.style.format({
-            "Satış Fiyatı":   "₺{:,.2f}",
-            "Birim Maliyet":  "₺{:,.2f}",
-            "Net Satış":      "₺{:,.2f}",
-            "Toplam Maliyet": "₺{:,.2f}",
-            "Brüt Kar":       "₺{:,.2f}",
-            "Net Kar":        "₺{:,.2f}",
-        }, na_rep="—").map(renk_kar, subset=["Brüt Kar", "Net Kar"]),
-        use_container_width=True,
-        height=460
-    )
+        st.dataframe(
+            goster.style.format({
+                "Birim Maliyet":   "₺{:,.2f}",
+                "Toplam Maliyet":  "₺{:,.2f}",
+            }, na_rep="—"),
+            use_container_width=True, height=400
+        )
+    else:
+        st.warning("⚠️ Ürün maliyeti girilmemiş — **Ürün Maliyetleri** sayfasından ekle.")
 
     # ── Gider detayı ──
     if not giderler.empty:
@@ -329,11 +336,22 @@ elif sayfa == "📊 Rapor":
 
     # ── CSV ──
     st.markdown("---")
-    csv = goster.to_csv(index=False, encoding="utf-8-sig")
-    st.download_button(
-        "📥 Raporu İndir (CSV)",
-        data=csv,
-        file_name="ideasoft_rapor.csv",
-        mime="text/csv",
-        use_container_width=True
-    )
+    if not maliyetler.empty:
+        csv_df = maliyetler[["urun_adi", "adet", "birim_maliyet", "toplam_maliyet"]].copy()
+        csv_df.columns = ["Ürün Adı", "Adet", "Birim Maliyet", "Toplam Maliyet"]
+        csv_df.loc[len(csv_df)] = ["TOPLAM", int(csv_df["Adet"].sum()), None, csv_df["Toplam Maliyet"].sum()]
+        ozet_df = pd.DataFrame([{
+            "Aktif Gelir": aktif_gelir, "Ürün Maliyeti": toplam_maliyet,
+            "Diğer Giderler": toplam_gider, "Net Kar": net_kar, "Marj %": round(marj, 1)
+        }])
+        csv_out = "\n\n".join([
+            "=== ÖZET ===\n" + ozet_df.to_csv(index=False, encoding="utf-8-sig"),
+            "=== ÜRÜN MALİYETLERİ ===\n" + csv_df.to_csv(index=False, encoding="utf-8-sig")
+        ])
+        st.download_button(
+            "📥 Raporu İndir (CSV)",
+            data=csv_out.encode("utf-8-sig"),
+            file_name=f"ideasoft_rapor_{tarih_aralik.replace(' ', '').replace('–','_')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )

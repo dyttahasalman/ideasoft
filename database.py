@@ -32,10 +32,12 @@ def init_db():
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
-        CREATE TABLE IF NOT EXISTS is_urunler (
-            urun_adi TEXT PRIMARY KEY,
-            satis_fiyati REAL DEFAULT 0,
-            maliyet REAL DEFAULT 0
+        CREATE TABLE IF NOT EXISTS is_maliyetler (
+            id SERIAL PRIMARY KEY,
+            urun_adi TEXT NOT NULL,
+            adet INTEGER DEFAULT 0,
+            birim_maliyet REAL DEFAULT 0,
+            toplam_maliyet REAL DEFAULT 0
         )
     """)
     c.execute("""
@@ -49,26 +51,26 @@ def init_db():
     conn.commit()
 
 
-@st.cache_data(ttl=300)
-def get_urun_map():
+def get_maliyetler():
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT urun_adi, satis_fiyati, maliyet FROM is_urunler")
-    return {r[0]: {"satis_fiyati": r[1], "maliyet": r[2]} for r in c.fetchall()}
+    return pd.read_sql("SELECT * FROM is_maliyetler ORDER BY id", conn)
 
 
-def save_urun(urun_adi, satis_fiyati, maliyet):
+def save_maliyet(urun_adi, adet, birim_maliyet):
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
-        INSERT INTO is_urunler (urun_adi, satis_fiyati, maliyet)
-        VALUES (%s, %s, %s)
-        ON CONFLICT (urun_adi) DO UPDATE SET
-            satis_fiyati = EXCLUDED.satis_fiyati,
-            maliyet      = EXCLUDED.maliyet
-    """, (urun_adi, satis_fiyati, maliyet))
+        INSERT INTO is_maliyetler (urun_adi, adet, birim_maliyet, toplam_maliyet)
+        VALUES (%s, %s, %s, %s)
+    """, (urun_adi, adet, birim_maliyet, adet * birim_maliyet))
     conn.commit()
-    get_urun_map.clear()
+
+
+def delete_maliyet(maliyet_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM is_maliyetler WHERE id = %s", (maliyet_id,))
+    conn.commit()
 
 
 def get_giderler():
