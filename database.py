@@ -31,7 +31,21 @@ def get_connection():
 def init_db():
     conn = get_connection()
     c = conn.cursor()
-    # Kalıcı ürün kataloğu — adet her dönem güncellenir
+
+    # Tablo şeması yanlışsa (eski sürüm) sil ve yeniden oluştur
+    c.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'is_urunler')
+            AND NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'is_urunler' AND column_name = 'adet'
+            ) THEN
+                DROP TABLE is_urunler;
+            END IF;
+        END $$;
+    """)
+
     c.execute("""
         CREATE TABLE IF NOT EXISTS is_urunler (
             id SERIAL PRIMARY KEY,
