@@ -101,33 +101,8 @@ if sayfa == "📂 Excel Yükle":
         d2.metric("İptal Bedeli",   para(iptal["tutar"].sum()))
         d3.metric("Bekleyen Bedel", para(bekler["tutar"].sum()))
 
-        # Tarih aralığı
-        if not aktif.empty:
-            st.markdown("---")
-            st.markdown("#### 📅 Tarih Filtresi (opsiyonel)")
-            tarihler = pd.to_datetime(aktif["tarih"])
-            min_t = tarihler.min().date()
-            max_t = tarihler.max().date()
-            col_a, col_b = st.columns(2)
-            with col_a:
-                bas = st.date_input("Başlangıç", value=min_t, min_value=min_t, max_value=max_t)
-            with col_b:
-                bit = st.date_input("Bitiş",     value=max_t, min_value=min_t, max_value=max_t)
-
-            aktif_f = aktif[(pd.to_datetime(aktif["tarih"]).dt.date >= bas) & (pd.to_datetime(aktif["tarih"]).dt.date <= bit)]
-            st.session_state["aktif_gelir"] = aktif_f["tutar"].sum()
-            st.session_state["tarih_aralik"] = f"{bas.strftime('%d.%m.%Y')} – {bit.strftime('%d.%m.%Y')}"
-            st.success(f"📅 {bas.strftime('%d.%m.%Y')} – {bit.strftime('%d.%m.%Y')} → Aktif Gelir: **{para(aktif_f['tutar'].sum())}** ({len(aktif_f)} sipariş)")
-
-            # Günlük grafik
-            st.markdown("---")
-            gunluk = aktif_f.copy()
-            gunluk["tarih_dt"] = pd.to_datetime(gunluk["tarih"])
-            gunluk = gunluk.groupby("tarih_dt")["tutar"].sum().reset_index()
-            fig = go.Figure()
-            fig.add_trace(go.Bar(x=gunluk["tarih_dt"], y=gunluk["tutar"], marker_color="#0066cc", name="Günlük Gelir"))
-            fig.update_layout(title="Günlük Sipariş Geliri", height=280, margin=dict(t=35))
-            st.plotly_chart(fig, use_container_width=True)
+        st.session_state["aktif_gelir"]  = aktif["tutar"].sum()
+        st.session_state["tarih_aralik"] = f"{df['tarih'].min()[:10]} – {df['tarih'].max()[:10]}"
 
         # Tüm sipariş tablosu
         st.markdown("---")
