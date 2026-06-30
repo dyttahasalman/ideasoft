@@ -515,8 +515,8 @@ elif sayfa == "📊 Rapor":
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Aktif Gelir",      para(aktif_gelir))
     c2.metric("Ürün Maliyeti",    para(-toplam_maliyet))
-    c3.metric("Diğer Giderler",   para(-toplam_gider))
-    c4.metric("Brüt Kar",         para(brut_kar))
+    c3.metric("Brüt Kar",         para(brut_kar))
+    c4.metric("Diğer Giderler",   para(-toplam_gider))
     c5.metric("NET KAR",          para(net_kar), delta=f"%{marj:.1f} marj")
 
     st.markdown("---")
