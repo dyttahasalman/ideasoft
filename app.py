@@ -2,11 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import io
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.units import cm
+from rapor import pdf_olustur
 from database import (
     init_db, get_urunler, upsert_urun, add_urun, delete_urun, reset_adetler,
     get_giderler, save_gider, delete_gider
@@ -25,131 +21,7 @@ ODEME_BASARISIZ = {"failed"}
 
 
 def para(x):
-    return f"TL {x:,.2f}"
-
-
-def _tr(s):
-    """Turkish chars → ASCII for PDF (Helvetica doesn't support Unicode)"""
-    return str(s)\
-        .replace("ş","s").replace("Ş","S")\
-        .replace("ı","i").replace("İ","I")\
-        .replace("ğ","g").replace("Ğ","G")\
-        .replace("ü","u").replace("Ü","U")\
-        .replace("ö","o").replace("Ö","O")\
-        .replace("ç","c").replace("Ç","C")
-
-
-def generate_pdf(aktif_gelir, toplam_maliyet, toplam_gider, brut_kar, net_kar, marj, tarih_aralik, maliyetler, giderler):
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-                            rightMargin=2*cm, leftMargin=2*cm,
-                            topMargin=2*cm, bottomMargin=2*cm)
-    styles = getSampleStyleSheet()
-    story = []
-
-    # Başlık
-    baslik_style = ParagraphStyle("baslik", parent=styles["Title"], fontSize=18, spaceAfter=4)
-    story.append(Paragraph("Idea Soft - Satis & Kar Raporu", baslik_style))
-    story.append(Paragraph(_tr(f"Donem: {tarih_aralik}"), styles["Normal"]))
-    story.append(Spacer(1, 0.5*cm))
-
-    # Özet tablo
-    ozet_data = [
-        ["Metrik", "Tutar"],
-        ["Aktif Gelir",    f"TL {aktif_gelir:,.2f}"],
-        ["Urun Maliyeti",  f"TL {toplam_maliyet:,.2f}"],
-        ["Diger Giderler", f"TL {toplam_gider:,.2f}"],
-        ["Brut Kar",       f"TL {brut_kar:,.2f}"],
-        ["NET KAR",        f"TL {net_kar:,.2f}"],
-        ["Marj",           f"%{marj:.1f}"],
-    ]
-    ozet_t = Table(ozet_data, colWidths=[9*cm, 7*cm])
-    ozet_t.setStyle(TableStyle([
-        ("BACKGROUND",    (0,0), (-1,0), colors.HexColor("#1a3a5c")),
-        ("TEXTCOLOR",     (0,0), (-1,0), colors.white),
-        ("FONTNAME",      (0,0), (-1,-1), "Helvetica"),
-        ("FONTNAME",      (0,0), (-1,0),  "Helvetica-Bold"),
-        ("FONTNAME",      (0,-2),(-1,-1), "Helvetica-Bold"),
-        ("FONTSIZE",      (0,0), (-1,-1), 10),
-        ("ALIGN",         (1,0), (1,-1),  "RIGHT"),
-        ("ROWBACKGROUNDS",(0,1), (-1,-3), [colors.white, colors.HexColor("#f0f4f8")]),
-        ("BACKGROUND",    (0,-2),(-1,-1), colors.HexColor("#d4edda")),
-        ("GRID",          (0,0), (-1,-1), 0.5, colors.grey),
-        ("TOPPADDING",    (0,0), (-1,-1), 6),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 6),
-        ("LEFTPADDING",   (0,0), (-1,-1), 8),
-    ]))
-    story.append(ozet_t)
-    story.append(Spacer(1, 0.6*cm))
-
-    # Ürün maliyet tablosu
-    if not maliyetler.empty:
-        story.append(Paragraph("Urun Maliyet Dokumu", styles["Heading2"]))
-        story.append(Spacer(1, 0.2*cm))
-        urun_data = [["Urun Adi", "Adet", "Birim Maliyet", "Toplam Maliyet"]]
-        for _, row in maliyetler.iterrows():
-            urun_data.append([
-                _tr(row["urun_adi"]),
-                str(int(row["adet"])),
-                f"TL {row['birim_maliyet']:,.2f}",
-                f"TL {row['toplam_maliyet']:,.2f}",
-            ])
-        urun_data.append([
-            "TOPLAM", str(int(maliyetler["adet"].sum())), "—",
-            f"TL {maliyetler['toplam_maliyet'].sum():,.2f}",
-        ])
-        urun_t = Table(urun_data, colWidths=[8*cm, 2*cm, 3.5*cm, 3.5*cm])
-        urun_t.setStyle(TableStyle([
-            ("BACKGROUND",    (0,0), (-1,0), colors.HexColor("#2e6da4")),
-            ("TEXTCOLOR",     (0,0), (-1,0), colors.white),
-            ("FONTNAME",      (0,0), (-1,-1), "Helvetica"),
-            ("FONTNAME",      (0,0), (-1,0),  "Helvetica-Bold"),
-            ("FONTNAME",      (0,-1),(-1,-1), "Helvetica-Bold"),
-            ("FONTSIZE",      (0,0), (-1,-1), 9),
-            ("ALIGN",         (1,0), (-1,-1), "RIGHT"),
-            ("ROWBACKGROUNDS",(0,1), (-1,-2), [colors.white, colors.HexColor("#f0f4f8")]),
-            ("BACKGROUND",    (0,-1),(-1,-1), colors.HexColor("#d4edda")),
-            ("GRID",          (0,0), (-1,-1), 0.5, colors.grey),
-            ("TOPPADDING",    (0,0), (-1,-1), 5),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 5),
-            ("LEFTPADDING",   (0,0), (-1,-1), 6),
-        ]))
-        story.append(urun_t)
-        story.append(Spacer(1, 0.6*cm))
-
-    # Gider tablosu
-    if not giderler.empty:
-        story.append(Paragraph("Gider Detayi", styles["Heading2"]))
-        story.append(Spacer(1, 0.2*cm))
-        gider_data = [["Kategori", "Aciklama", "Tutar"]]
-        for _, g in giderler.iterrows():
-            gider_data.append([
-                _tr(g["kategori"]),
-                _tr(str(g["aciklama"] or "—")),
-                f"TL {g['tutar']:,.2f}",
-            ])
-        gider_data.append(["TOPLAM", "—", f"TL {giderler['tutar'].sum():,.2f}"])
-        gider_t = Table(gider_data, colWidths=[4*cm, 9*cm, 4*cm])
-        gider_t.setStyle(TableStyle([
-            ("BACKGROUND",    (0,0), (-1,0), colors.HexColor("#2e6da4")),
-            ("TEXTCOLOR",     (0,0), (-1,0), colors.white),
-            ("FONTNAME",      (0,0), (-1,-1), "Helvetica"),
-            ("FONTNAME",      (0,0), (-1,0),  "Helvetica-Bold"),
-            ("FONTNAME",      (0,-1),(-1,-1), "Helvetica-Bold"),
-            ("FONTSIZE",      (0,0), (-1,-1), 9),
-            ("ALIGN",         (2,0), (2,-1),  "RIGHT"),
-            ("ROWBACKGROUNDS",(0,1), (-1,-2), [colors.white, colors.HexColor("#f0f4f8")]),
-            ("BACKGROUND",    (0,-1),(-1,-1), colors.HexColor("#d4edda")),
-            ("GRID",          (0,0), (-1,-1), 0.5, colors.grey),
-            ("TOPPADDING",    (0,0), (-1,-1), 5),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 5),
-            ("LEFTPADDING",   (0,0), (-1,-1), 6),
-        ]))
-        story.append(gider_t)
-
-    doc.build(story)
-    buf.seek(0)
-    return buf.getvalue()
+    return f"₺{x:,.2f}"
 
 
 def _norm(s):
@@ -557,14 +429,20 @@ elif sayfa == "📊 Rapor":
     dl1, dl2 = st.columns(2)
 
     with dl1:
-        pdf_bytes = generate_pdf(
-            aktif_gelir, toplam_maliyet, toplam_gider,
-            brut_kar, net_kar, marj, tarih_aralik,
-            maliyetler, giderler
-        )
+        ozet = {
+            "aktif_gelir":    aktif_gelir,
+            "toplam_maliyet": toplam_maliyet,
+            "brut_kar":       brut_kar,
+            "toplam_gider":   toplam_gider,
+            "net_kar":        net_kar,
+            "marj":           marj,
+            "siparis_sayisi": len(st.session_state["df"]) if st.session_state.get("df") is not None else 0,
+            "urun_sayisi":    len(maliyetler) if not maliyetler.empty else 0,
+        }
+        pdf_buf = pdf_olustur(ozet, maliyetler if not maliyetler.empty else None, giderler if not giderler.empty else None, tarih_aralik)
         st.download_button(
             "📄 Raporu İndir (PDF)",
-            data=pdf_bytes,
+            data=pdf_buf,
             file_name=f"ideasoft_rapor_{dosya_adi}.pdf",
             mime="application/pdf",
             use_container_width=True,
