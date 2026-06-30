@@ -76,7 +76,7 @@ with st.sidebar:
 
     if st.session_state.get("df") is not None:
         df = st.session_state["df"]
-        aktif = df[df["durum"].isin(AKTIF_DURUMLAR) & df["odeme"].isin(ODEME_BASARILI)]
+        aktif = df[~df["durum"].isin(IPTAL_DURUMLAR) & ~df["odeme"].isin(ODEME_BASARISIZ)]
         st.success(f"✅ {len(df)} sipariş yüklü")
         st.metric("Aktif Gelir", para(aktif["tutar"].sum()))
     else:
@@ -270,7 +270,7 @@ elif sayfa == "📊 Rapor":
 
     if aktif_gelir is None and st.session_state.get("df") is not None:
         df = st.session_state["df"]
-        aktif = df[df["durum"].isin(AKTIF_DURUMLAR) & df["odeme"].isin(ODEME_BASARILI)]
+        aktif = df[~df["durum"].isin(IPTAL_DURUMLAR) & ~df["odeme"].isin(ODEME_BASARISIZ)]
         aktif_gelir = aktif["tutar"].sum()
         st.session_state["aktif_gelir"] = aktif_gelir
 
