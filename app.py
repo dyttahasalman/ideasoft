@@ -29,12 +29,22 @@ def parse_excel(dosya):
     for row in ws.iter_rows(min_row=2, values_only=True):
         if row[0] is None:
             continue
+        try:
+            tutar_raw = row[7]
+            if tutar_raw is None:
+                tutar = 0.0
+            elif isinstance(tutar_raw, str):
+                tutar = float(tutar_raw.replace(",", ".").replace(" ", ""))
+            else:
+                tutar = float(tutar_raw)
+        except (ValueError, TypeError):
+            tutar = 0.0
         satirlar.append({
-            "siparis_no":  row[0],
-            "durum":       str(row[5] or "").strip(),
-            "odeme":       str(row[6] or "").strip(),
-            "tutar":       float(row[7] or 0),
-            "tarih":       str(row[8] or "")[:10],
+            "siparis_no": row[0],
+            "durum":      str(row[5] or "").strip(),
+            "odeme":      str(row[6] or "").strip(),
+            "tutar":      tutar,
+            "tarih":      str(row[8] or "")[:10],
         })
     return pd.DataFrame(satirlar)
 
