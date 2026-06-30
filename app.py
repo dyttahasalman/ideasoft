@@ -20,33 +20,45 @@ def para(x):
     return f"₺{x:,.2f}"
 
 
+def _norm(s):
+    return str(s).lower().replace("ş","s").replace("ı","i").replace("ö","o").replace("ü","u").replace("ğ","g").replace("ç","c")
+
+def _bul(df, *anahtar):
+    for col in df.columns:
+        n = _norm(col)
+        if all(k in n for k in anahtar):
+            return col
+    return None
+
 def parse_excel(dosya):
-    wb_bytes = dosya.read()
-    import openpyxl
-    wb = openpyxl.load_workbook(io.BytesIO(wb_bytes))
-    ws = wb.active
-    satirlar = []
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if row[0] is None:
-            continue
-        try:
-            tutar_raw = row[7]
-            if tutar_raw is None:
-                tutar = 0.0
-            elif isinstance(tutar_raw, str):
-                tutar = float(tutar_raw.replace(",", ".").replace(" ", ""))
-            else:
-                tutar = float(tutar_raw)
-        except (ValueError, TypeError):
-            tutar = 0.0
-        satirlar.append({
-            "siparis_no": row[0],
-            "durum":      str(row[5] or "").strip(),
-            "odeme":      str(row[6] or "").strip(),
-            "tutar":      tutar,
-            "tarih":      str(row[8] or "")[:10],
-        })
-    return pd.DataFrame(satirlar)
+    df_raw = pd.read_excel(dosya, engine="openpyxl")
+    df_raw = df_raw[df_raw.iloc[:, 0].notna()].reset_index(drop=True)
+
+    col_no     = df_raw.columns[0]
+    col_tutar  = _bul(df_raw, "tutar")
+    col_durum  = _bul(df_raw, "siparis", "durumu") or _bul(df_raw, "durum")
+    col_odeme  = _bul(df_raw, "odeme")
+    col_tarih  = _bul(df_raw, "tarih")
+
+    # Müşteri: tek sütun (ad soyad) veya iki ayrı sütun (ad + soyad)
+    col_musteri_tek = _bul(df_raw, "ad", "soyad")
+    col_ad          = _bul(df_raw, "musteri", "adi") or _bul(df_raw, "ad")
+    col_soyad       = _bul(df_raw, "soyad")
+    if col_musteri_tek:
+        musteri = df_raw[col_musteri_tek].fillna("").astype(str)
+    elif col_ad and col_soyad:
+        musteri = df_raw[col_ad].fillna("").astype(str) + " " + df_raw[col_soyad].fillna("").astype(str)
+    else:
+        musteri = pd.Series([""] * len(df_raw))
+
+    return pd.DataFrame({
+        "siparis_no": df_raw[col_no].astype(str),
+        "musteri":    musteri.str.strip(),
+        "durum":      df_raw[col_durum].fillna("").astype(str).str.strip() if col_durum else "",
+        "odeme":      df_raw[col_odeme].fillna("").astype(str).str.strip() if col_odeme else "",
+        "tutar":      pd.to_numeric(df_raw[col_tutar], errors="coerce").fillna(0) if col_tutar else 0,
+        "tarih":      df_raw[col_tarih].astype(str).str[:10] if col_tarih else "",
+    })
 
 
 # ── Sidebar ──────────────────────────────────────────────────────
@@ -131,8 +143,8 @@ if sayfa == "📂 Excel Yükle":
         # Tüm sipariş tablosu
         st.markdown("---")
         st.markdown("#### Sipariş Listesi")
-        goster = df.copy()
-        goster.columns = ["Sipariş No", "Durum", "Ödeme", "Tutar", "Tarih"]
+        goster = df[["siparis_no", "musteri", "durum", "odeme", "tutar", "tarih"]].copy()
+        goster.columns = ["Sipariş No", "Müşteri", "Durum", "Ödeme", "Tutar", "Tarih"]
         st.dataframe(
             goster.style.format({"Tutar": "₺{:,.2f}"}),
             use_container_width=True, height=360
